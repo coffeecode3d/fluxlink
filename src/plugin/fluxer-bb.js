@@ -42,7 +42,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "0.8.0";
+	const VERSION = "0.8.1";
 	const TAG = "[FluxerBB]";
 
 	if (window.__fluxerBB && window.__fluxerBB.version) {

@@ -33,7 +33,7 @@ terminal, `node bin/fluxlink.js` still works. Confirm:
 
 - the broadcast button appears next to **Share your screen** in the call controls;
 - the floating **BB** button exists outside a call;
-- the panel reports version `0.8.0` or newer;
+- the panel reports version `0.8.1` or newer;
 - **Settings → Developer → Plugins** exists.
 
 Set your Broadcast Box host in the panel on both devices. Do not use a host you do

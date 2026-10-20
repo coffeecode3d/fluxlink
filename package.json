@@ -1,6 +1,6 @@
 {
 	"name": "fluxlink",
-	"version": "0.8.0",
+	"version": "0.8.1",
 	"description": "Experimental Broadcast Box screen-share bridge and plugin host for the Fluxer desktop client",
 	"license": "MIT",
 	"author": "Fluxlink contributors",

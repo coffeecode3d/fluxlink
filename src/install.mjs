@@ -323,7 +323,17 @@ function installLinux({root, autostart, bin}) {
 			: path.join(os.homedir(), ".local", "share", "applications", source.name);
 		if (seen.has(target)) continue;
 		seen.add(target);
-		const rewritten = rewriteDesktop(source.content, wrapper);
+		// Prefer an existing Fluxer entry at the target as the template. This
+		// preserves a user entry's %U and custom actions when a reinstall
+		// falls back to the bare system entry as the source.
+		let base = source.content;
+		if (exists(target)) {
+			try {
+				const existing = fs.readFileSync(target, "utf8");
+				if (/fluxer/i.test(existing) || existing.includes(MARKER)) base = existing;
+			} catch (_) {}
+		}
+		const rewritten = rewriteDesktop(base, wrapper);
 		writeManaged(manifest, target, rewritten, 0o644);
 		installed += 1;
 		log(`desktop entry: ${target}`);
