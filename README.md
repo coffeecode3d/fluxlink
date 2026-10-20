@@ -20,6 +20,9 @@ Status:
 - ✅ **viewer path**: a screen-share tile is detected, WHEP-subscribed and swapped in place → **1920×1080 H264 decoded**, restored when the broadcast ends
 - ✅ **real screen picker**: verified end-to-end (real capture → placeholder → WHIP → WHEP decode at 1920×1080, two concurrent plugin viewers)
 - ✅ **hardware encode**: H264 on the GPU at 59 fps @1080p, after working around a Mesa/radeonsi keyframe bug
+- ✅ **viewer state repair** (0.7.1): if Fluxer never delivers the broadcaster's
+  gateway `self_stream` update, rebuild it from the LiveKit screen publication so the
+  native tile renders before the Broadcast Box swap
 - ✅ **plugin store**: local install/remove/enable API, built-in index + any HTTPS index URL,
   two example plugins (stats overlay, panel hotkey)
 - ✅ **Settings → Plugins page**: embedded native settings page with repo index input,
@@ -385,6 +388,8 @@ __fluxerBB.tiles()        // identity / isLocal / derived key for each share til
 __fluxerBB.findLocalIdentity()
 __fluxerBB.keyForIdentity(identity)
 __fluxerBB.scan()         // force a viewer scan
+__fluxerBB.heal()         // repair missed remote self_stream voice states (viewer side)
+__fluxerBB.remoteStreams() // LiveKit screen publications seen by the viewer
 __fluxerBB.openPanel()
 __fluxerBB.openSettings()   // embedded Settings → Plugins page
 __fluxerBB.closePanel() / __fluxerBB.togglePanel()
@@ -401,10 +406,17 @@ __fluxerBB.stop()         // full teardown
 - One BB stream per sharing user; the key is the LiveKit identity, so reconnecting to
   voice produces a new key (viewers re-derive it automatically).
 - **Viewers with the plugin** get the full-quality Broadcast Box stream in `bb` mode.
+  Some Fluxer clients miss the broadcaster's gateway `VOICE_STATE_UPDATE`, so their
+  `connectionVoiceStates` never gets `self_stream: true` and Fluxer renders no tile —
+  even though the LiveKit screen publication is present. Since **0.7.1** the viewer
+  plugin rebuilds that missing state from the LiveKit participant metadata, so the
+  normal native tile appears and the Broadcast Box swap can attach to it. The panel
+  shows `LiveKit stream(s) detected (repaired N)` when this happens; `__fluxerBB.heal()`
+  forces it manually.
   **Unmodded viewers** are supposed to see the low-fps placeholder through LiveKit;
-  the preview/tile handoff is still being debugged on current Fluxer. If a stock
-  viewer sees no tile or a blank preview, reproduce the same share in `uncapped` or
-  `mirror` mode for comparison. This is the main open issue.
+  that handoff is still being debugged on current Fluxer. If a stock viewer sees no
+  tile or a blank preview, reproduce the same share in `uncapped` or `mirror` mode for
+  comparison. This is the main open issue.
 - **Mirror mode** publishes through LiveKit for everyone. Plugin viewers do not get
   the direct-BB tile swap in that mode because the OBS key is not derived from the
   broadcaster's Fluxer identity.

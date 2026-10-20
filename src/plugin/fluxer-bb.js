@@ -42,7 +42,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "0.7.0";
+	const VERSION = "0.7.1";
 	const TAG = "[FluxerBB]";
 
 	if (window.__fluxerBB && window.__fluxerBB.version) {
@@ -2087,8 +2087,128 @@
 		statusCache: new Map(), // key -> {at, live}
 		pending: new WeakSet(),
 		tiles: 0,
+		healed: 0,
+		remoteStreams: [],
+		repairAttempts: new Map(), // connectionId -> last attempt timestamp
 		lastError: null,
 	};
+
+	function parseRoomMetadata(raw) {
+		if (!raw) return {};
+		try {
+			return JSON.parse(raw) || {};
+		} catch (_) {
+			return {};
+		}
+	}
+
+	function remoteParticipants(room) {
+		const out = [];
+		const map = room && room.remoteParticipants;
+		if (!map) return out;
+		try {
+			if (typeof map.forEach === "function") {
+				map.forEach((participant) => {
+					if (participant && !participant.isLocal) out.push(participant);
+				});
+			} else if (typeof map === "object") {
+				for (const key of Object.keys(map)) {
+					const participant = map[key];
+					if (participant && !participant.isLocal) out.push(participant);
+				}
+			}
+		} catch (_) {}
+		return out;
+	}
+
+	/** Find a current (unmuted) screen-share video publication on a participant. */
+	function screenPublication(participant) {
+		let found = null;
+		try {
+			const publications = participant && participant.trackPublications;
+			const visit = (publication) => {
+				if (!publication || found) return;
+				const source = String(publication.source || "").toLowerCase();
+				const kind = String(publication.kind || "").toLowerCase();
+				if (source.indexOf("screen") >= 0 && kind !== "audio" && !publication.isMuted) {
+					found = publication;
+				}
+			};
+			if (publications && typeof publications.forEach === "function") {
+				publications.forEach(visit);
+			} else if (publications && typeof publications === "object") {
+				for (const key of Object.keys(publications)) visit(publications[key]);
+			}
+		} catch (_) {}
+		return found;
+	}
+
+	/**
+	 * Fluxer normally receives the broadcaster's gateway VOICE_STATE_UPDATE and
+	 * uses self_stream/channel_id to decide whether a LiveKit screen track is a
+	 * visible share. Some clients miss that update (or receive it without
+	 * self_stream) while the LiveKit screen publication is present. The native
+	 * tile then never renders, so the Broadcast Box swap has nothing to attach
+	 * to. Rebuild exactly the missing voice state from the LiveKit participant
+	 * metadata; Fluxer's own reducer then renders the normal tile.
+	 */
+	function healRemoteVoiceStates() {
+		const facade = mediaFacade();
+		if (!facade || !facade.room) return;
+		if (typeof facade.handleGatewayVoiceStateUpdate !== "function") return;
+		const states = facade.connectionVoiceStates || {};
+		const discovered = [];
+		let changed = 0;
+
+		for (const participant of remoteParticipants(facade.room)) {
+			const publication = screenPublication(participant);
+			if (!publication) continue;
+			const parsed = parseIdentity(participant.identity);
+			if (!parsed) continue;
+			discovered.push({identity: participant.identity, key: keyForIdentity(participant.identity)});
+
+			const meta = parseRoomMetadata(participant.metadata);
+			const guildId = facade.guildId || meta.guild_id || null;
+			const channelId = facade.channelId || meta.channel_id || null;
+			if (!channelId) continue;
+
+			const current = states[parsed.connectionId];
+			if (current && current.self_stream === true && current.channel_id === channelId) continue;
+			const lastAttempt = viewer.repairAttempts.get(parsed.connectionId) || 0;
+			if (Date.now() - lastAttempt < 5000) continue;
+			viewer.repairAttempts.set(parsed.connectionId, Date.now());
+			// The native filter looks the LiveKit identity's connection id up in
+			// this map, so this key must match even if an older stale connection
+			// id is also present for the same user.
+			const state = {
+				guild_id: guildId,
+				channel_id: channelId,
+				connection_id: parsed.connectionId,
+				user_id: parsed.userId,
+				session_id: (current && current.session_id) || participant.sid || parsed.connectionId,
+				self_mute: current ? Boolean(current.self_mute) : !participant.isMicrophoneEnabled,
+				self_deaf: current ? Boolean(current.self_deaf) : false,
+				self_video: current ? Boolean(current.self_video) : Boolean(participant.isCameraEnabled),
+				self_stream: true,
+				viewer_stream_keys: (current && current.viewer_stream_keys) || [],
+				suppress: false,
+				is_mobile: Boolean(current && current.is_mobile),
+				p2p: false,
+			};
+			if (current && current.member) state.member = current.member;
+			try {
+				facade.handleGatewayVoiceStateUpdate(guildId, state);
+				changed += 1;
+				log("viewer: restored missing self_stream for", parsed.connectionId);
+			} catch (err) {
+				viewer.lastError = String((err && err.message) || err);
+				warn("viewer: could not restore remote stream state:", viewer.lastError);
+			}
+		}
+
+		viewer.healed = changed;
+		viewer.remoteStreams = discovered;
+	}
 
 	async function isLive(key) {
 		if (!config.host) return false;
@@ -2253,6 +2373,11 @@
 		if (scanTimer) return;
 		scanTimer = setInterval(() => {
 			try {
+				healRemoteVoiceStates();
+			} catch (err) {
+				warn("viewer state repair failed:", err);
+			}
+			try {
 				scanViewer();
 			} catch (err) {
 				warn("viewer scan failed:", err);
@@ -2269,6 +2394,9 @@
 		}, 1200);
 		try {
 			observer = new MutationObserver(() => {
+				try {
+					healRemoteVoiceStates();
+				} catch (_) {}
 				try {
 					scanViewer();
 				} catch (_) {}
@@ -2884,7 +3012,20 @@ input, select {
 			} else {
 				lines.push("<b>You</b> not in a voice connection");
 			}
-			lines.push("<b>Tiles</b> " + viewer.tiles + " screen share(s) · " + viewer.swaps.size + " on Broadcast Box");
+			const remoteNote = viewer.remoteStreams.length
+				? " · " +
+					viewer.remoteStreams.length +
+					" LiveKit stream(s) detected" +
+					(viewer.healed ? " (repaired " + viewer.healed + ")" : "")
+				: "";
+			lines.push(
+				"<b>Tiles</b> " +
+					viewer.tiles +
+					" screen share(s) · " +
+					viewer.swaps.size +
+					" on Broadcast Box" +
+					remoteNote,
+			);
 			if (publisher.lastError) lines.push("<span class='err'>" + escapeHtml(publisher.lastError) + "</span>");
 			if (viewer.lastError) lines.push("<span class='err'>" + escapeHtml(viewer.lastError) + "</span>");
 			if (mirror.lastError) lines.push("<span class='err'>" + escapeHtml(mirror.lastError) + "</span>");
@@ -2995,6 +3136,15 @@ input, select {
 			scanViewer();
 			return window.__fluxerBB.tiles();
 		},
+		heal: () => {
+			healRemoteVoiceStates();
+			return {
+				remoteStreams: viewer.remoteStreams.slice(),
+				healed: viewer.healed,
+				lastError: viewer.lastError,
+			};
+		},
+		remoteStreams: () => viewer.remoteStreams.slice(),
 		tiles: () => {
 			const out = [];
 			document.querySelectorAll('[data-source="screen_share"]').forEach((tile) => {
@@ -3023,6 +3173,8 @@ input, select {
 			mirror: { active: mirror.active, key: mirror.key || config.mirrorKey || null },
 			tiles: viewer.tiles,
 			swaps: viewer.swaps.size,
+			remoteStreams: viewer.remoteStreams.slice(),
+			healed: viewer.healed,
 			lastError: publisher.lastError || viewer.lastError || mirror.lastError || null,
 		}),
 		debug: () => ({

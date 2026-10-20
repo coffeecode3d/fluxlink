@@ -32,7 +32,7 @@ the plugin. Confirm:
 
 - the broadcast button appears next to **Share your screen** in the call controls;
 - the floating **BB** button exists outside a call;
-- the panel reports version `0.7.0` or newer;
+- the panel reports version `0.7.1` or newer;
 - **Settings → Developer → Plugins** exists.
 
 Set your Broadcast Box host in the panel on both devices. Do not use a host you do
@@ -58,8 +58,16 @@ Record these on the viewer:
 
 ```js
 __fluxerBB.state()
+__fluxerBB.remoteStreams()   // LiveKit screen publications the viewer can see
+__fluxerBB.heal()            // force the missed self_stream state repair
+__fluxerBB.tiles()           // native screen-share tiles after the repair
 __fluxerBB.debugAsync()
 ```
+
+If no tile appears on a plugin viewer, `__fluxerBB.remoteStreams()` should still list
+the broadcaster. `__fluxerBB.heal()` rebuilds the missing gateway `self_stream` state
+from that publication; `tiles()` should then return one entry and the panel should
+show `LiveKit stream(s) detected (repaired N)`. Report both outputs.
 
 Known open issue: a **stock Fluxer client** may show the screen-share tile but a
 blank preview, or no tile at all. If that happens, note whether the tile exists and
