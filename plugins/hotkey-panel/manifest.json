@@ -1,0 +1,9 @@
+{
+  "name": "Panel hotkey",
+  "id": "hotkey-panel",
+  "version": "1.0.0",
+  "creator": "fluxer-bb",
+  "description": "Ctrl+Shift+B toggles the FluxerBB settings panel from anywhere in the app.",
+  "main": "plugin.js",
+  "apiVersion": 1
+}

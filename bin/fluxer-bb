@@ -1,0 +1,4 @@
+#!/usr/bin/env node
+// Compatibility alias for the old launcher path.
+// Prefer: node bin/fluxlink.js
+import "./fluxlink.js";

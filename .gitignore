@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Builds and release artifacts
+dist/
+*.zip
+
+# Local logs and runtime state
+*.log
+*.pid
+panel.png
+
+# Secrets and local overrides
+.env
+.env.*
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

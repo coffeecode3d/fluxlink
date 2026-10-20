@@ -1,0 +1,6 @@
+{
+  "plugins": [
+    { "id": "stats-overlay" },
+    { "id": "hotkey-panel" }
+  ]
+}

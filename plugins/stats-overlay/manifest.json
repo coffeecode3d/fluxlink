@@ -1,0 +1,9 @@
+{
+  "name": "Stream stats overlay",
+  "id": "stats-overlay",
+  "version": "1.0.0",
+  "creator": "fluxer-bb",
+  "description": "Small overlay showing the active encoder, resolution, fps and target bitrate while you publish.",
+  "main": "plugin.js",
+  "apiVersion": 1
+}

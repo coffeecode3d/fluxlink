@@ -1,0 +1,46 @@
+{
+	"name": "fluxlink",
+	"version": "0.7.0",
+	"description": "Experimental Broadcast Box screen-share bridge and plugin host for the Fluxer desktop client",
+	"license": "MIT",
+	"author": "Fluxlink contributors",
+	"type": "module",
+	"bin": {
+		"fluxlink": "bin/fluxlink.js"
+	},
+	"files": [
+		"bin/",
+		"src/",
+		"plugins/",
+		"README.md",
+		"TESTING.md",
+		"SECURITY.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"start": "node bin/fluxlink.js",
+		"attach": "node bin/fluxlink.js --attach",
+		"check": "node bin/fluxlink.js --check",
+		"inject": "node src/loader.mjs",
+		"verify": "node src/verify.mjs"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/coffeecode3d/fluxlink.git"
+	},
+	"homepage": "https://github.com/coffeecode3d/fluxlink#readme",
+	"bugs": {
+		"url": "https://github.com/coffeecode3d/fluxlink/issues"
+	},
+	"keywords": [
+		"fluxer",
+		"broadcast-box",
+		"whip",
+		"whep",
+		"screenshare",
+		"electron"
+	],
+	"engines": {
+		"node": ">=22"
+	}
+}
