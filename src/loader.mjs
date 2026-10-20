@@ -25,6 +25,7 @@ import {readFile} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import path from "node:path";
 import {startStoreServer} from "./store.mjs";
+import {clearLock, lockPath, readLock, writeLock} from "./paths.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
@@ -45,10 +46,62 @@ const VERBOSE = args.includes("--verbose");
 // --force tears down a previously injected copy first, so plugin edits apply
 // without restarting Fluxer.
 const FORCE = args.includes("--force");
+const LOCK_PATH = argValue("lock", lockPath(PORT));
 const DISCOVERY_URL = `http://127.0.0.1:${PORT}/json/list`;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function log(...a) {
 	console.log(new Date().toISOString().slice(11, 19), "[loader]", ...a);
+}
+
+/**
+ * Keep one loader per CDP port. A GUI launch can happen while a previous
+ * loader is still watching a running Fluxer; starting a second one would
+ * leak a process per click. --force stops the old loader so a freshly edited
+ * plugin is read again.
+ */
+async function acquireLoaderLock() {
+	const existing = readLock(LOCK_PATH);
+	if (existing && existing.pid !== process.pid) {
+		if (!FORCE) {
+			log(`another loader is already watching port ${PORT} (pid ${existing.pid}); exiting`);
+			return false;
+		}
+		log(`--force: stopping existing loader (pid ${existing.pid})`);
+		try {
+			process.kill(existing.pid, "SIGTERM");
+		} catch (_) {}
+		for (let i = 0; i < 10 && readLock(LOCK_PATH); i += 1) await sleep(200);
+	}
+	writeLock(LOCK_PATH, {pid: process.pid, port: PORT, apiPort: API_PORT, root: ROOT, startedAt: Date.now()});
+	let heartbeat = null;
+	const cleanup = () => {
+		if (heartbeat) clearInterval(heartbeat);
+		clearLock(LOCK_PATH, process.pid);
+	};
+	heartbeat = setInterval(() => {
+		try {
+			writeLock(LOCK_PATH, {pid: process.pid, port: PORT, apiPort: API_PORT, root: ROOT, startedAt: Date.now(), heartbeatAt: Date.now()});
+		} catch (_) {}
+	}, 15000);
+	if (heartbeat.unref) heartbeat.unref();
+	process.on("exit", cleanup);
+	process.on("SIGINT", () => {
+		cleanup();
+		process.exit(130);
+	});
+	process.on("SIGTERM", () => {
+		cleanup();
+		process.exit(143);
+	});
+	return true;
+}
+
+async function readSource() {
+	const raw = await readFile(PLUGIN_PATH, "utf8");
+	// Tell the renderer where the plugin store API lives. Prepended so the
+	// plugin also gets it through addScriptToEvaluateOnNewDocument.
+	return `window.__fluxerBBPluginApi = ${JSON.stringify(`http://127.0.0.1:${API_PORT}`)};\n` + raw;
 }
 
 async function listTargets() {
@@ -215,15 +268,14 @@ async function evaluate(session, source, label) {
 async function main() {
 	let source;
 	try {
-		source = await readFile(PLUGIN_PATH, "utf8");
+		source = await readSource();
 	} catch (err) {
 		console.error(`Cannot read plugin at ${PLUGIN_PATH}: ${err.message}`);
 		process.exitCode = 1;
 		return;
 	}
-	// Tell the renderer where the plugin store API lives. Prepended so the
-	// plugin also gets it through addScriptToEvaluateOnNewDocument.
-	source = `window.__fluxerBBPluginApi = ${JSON.stringify(`http://127.0.0.1:${API_PORT}`)};\n` + source;
+
+	if (!CHECK_ONLY && !(await acquireLoaderLock())) return;
 
 	let targets = [];
 	try {
@@ -281,7 +333,10 @@ async function main() {
 		for (const target of current.filter(isInjectable)) {
 			if (sessions.has(target.id)) continue;
 			try {
-				sessions.set(target.id, await injectInto(target, source));
+				// Re-read on every new window so a git pull + Fluxer restart
+				// picks up new plugin code without restarting the loader.
+				const fresh = await readSource();
+				sessions.set(target.id, await injectInto(target, fresh));
 			} catch (err) {
 				log(`attach failed for new target: ${err.message}`);
 			}

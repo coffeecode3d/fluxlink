@@ -16,7 +16,7 @@ This is the quickest way to validate a Fluxlink test build with a second machine
 ```bash
 git clone https://github.com/coffeecode3d/fluxlink.git
 cd fluxlink
-node bin/fluxlink.js
+node bin/fluxlink.js --install
 ```
 
 Windows:
@@ -24,15 +24,16 @@ Windows:
 ```powershell
 git clone https://github.com/coffeecode3d/fluxlink.git
 cd fluxlink
-node bin\fluxlink.js
+node bin\fluxlink.js --install
 ```
 
-Keep the terminal open. The launcher will restart Fluxer with CDP enabled and inject
-the plugin. Confirm:
+After installing, close Fluxer and open it from the normal Fluxer icon. The
+launcher runs in the background; no terminal needs to stay open. If you prefer a
+terminal, `node bin/fluxlink.js` still works. Confirm:
 
 - the broadcast button appears next to **Share your screen** in the call controls;
 - the floating **BB** button exists outside a call;
-- the panel reports version `0.7.1` or newer;
+- the panel reports version `0.8.0` or newer;
 - **Settings → Developer → Plugins** exists.
 
 Set your Broadcast Box host in the panel on both devices. Do not use a host you do

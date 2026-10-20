@@ -1,6 +1,6 @@
 {
 	"name": "fluxlink",
-	"version": "0.7.1",
+	"version": "0.8.0",
 	"description": "Experimental Broadcast Box screen-share bridge and plugin host for the Fluxer desktop client",
 	"license": "MIT",
 	"author": "Fluxlink contributors",
@@ -19,6 +19,9 @@
 	],
 	"scripts": {
 		"start": "node bin/fluxlink.js",
+		"setup": "node bin/fluxlink.js --install",
+		"status": "node bin/fluxlink.js --status",
+		"remove": "node bin/fluxlink.js --uninstall",
 		"attach": "node bin/fluxlink.js --attach",
 		"check": "node bin/fluxlink.js --check",
 		"inject": "node src/loader.mjs",

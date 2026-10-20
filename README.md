@@ -32,6 +32,9 @@ Status:
   (simulated end-to-end; real-OBS validation still pending)
 - ✅ **cross-platform launcher**: Node-only, with Fluxer autodetection on Windows,
   Linux and macOS
+- ✅ **one-command install** (0.8.0): makes the normal Fluxer icon launch through
+  Fluxlink, so the plugin injects automatically and no terminal stays open;
+  `--autostart` replaces the stock login entry, `--uninstall` restores everything
 
 ---
 
@@ -232,14 +235,51 @@ upgrading Broadcast Box.
 
 Requires **Node 22 or newer**. Nothing is installed inside Fluxer.
 
+### Install it (recommended)
+
 Download the latest release zip from
 <https://github.com/coffeecode3d/fluxlink/releases>, or clone the repo:
 
 ```bash
 git clone https://github.com/coffeecode3d/fluxlink.git
 cd fluxlink
+node bin/fluxlink.js --install
+```
+
+That installs a small user-level launcher and points the normal Fluxer shortcut at
+it. Launch Fluxer the same way you always do — the plugin is injected in the
+background, with no terminal window. `--install --autostart` also adds a login
+entry (and replaces the stock Fluxer login entry on Linux and Windows), so the
+first launch after login is covered too:
+
+```bash
+node bin/fluxlink.js --install --autostart   # also start through Fluxlink at login
+node bin/fluxlink.js --status                # show installed paths and loader state
+node bin/fluxlink.js --uninstall             # restore the original shortcuts
+```
+
+`--install` never modifies `/opt/fluxer-bin`, `app.asar` or the Fluxer install
+directory. It writes only to your user profile:
+
+- Linux: `~/.local/bin/fluxlink-launch`, user `.desktop` overrides, optional
+  `~/.config/autostart/fluxlink.desktop`
+- Windows: `%LOCALAPPDATA%\Fluxlink\launch.vbs`, Start Menu/Desktop/taskbar
+  shortcuts, optional Startup shortcut
+- macOS: `~/Applications/Fluxlink.app`, optional LaunchAgent (macOS cannot shadow
+  `/Applications/Fluxer.app` without admin, so launch Fluxlink.app instead)
+
+If you move the repo, run `--install` again so the wrapper points at the new path.
+`git pull` does not require reinstalling. A Fluxer update may recreate its own
+shortcut/autostart entries; re-run `--install` (or `--install --autostart`) if the
+normal icon stops injecting after an update.
+
+### Run it manually
+
+```bash
 node bin/fluxlink.js            # asks before restarting Fluxer; then injects
 node bin/fluxlink.js --yes      # no prompt
+node bin/fluxlink.js --daemon   # launch + loader in the background, then return
+node bin/fluxlink.js --force    # stop the running loader and re-inject the current plugin
 node bin/fluxlink.js --attach   # don't launch anything; inject into a running (already-flagged) Fluxer
 node bin/fluxlink.js --check    # list CDP targets and exit
 ```
@@ -270,8 +310,12 @@ autodetects Fluxer in common install locations on Windows, Linux and macOS. Set
 `FLUXER_BIN` if your install is somewhere else. If the loader fails, Fluxer still
 launches normally — the launcher only adds flags and starts the loader.
 
+After `--install`, the desktop/shortcut entry calls the same launcher with
+`--daemon`, so the loader survives Fluxer restarts and one loader is reused per
+CDP port. The desktop entry forwards URLs and Fluxer task arguments unchanged.
 Use `node bin/fluxlink.js --print-bin` to see which Fluxer executable it found.
-The loader logs to the terminal; keep that window open while testing. Add
+The loader logs to the terminal in manual mode, or to
+`~/.cache/fluxlink/loader.log` (platform-equivalent) in installed mode. Add
 `--verbose` to see plugin console messages.
 
 ### Using it
@@ -439,6 +483,17 @@ __fluxerBB.stop()         // full teardown
 
 ## Uninstall
 
+If you ran the installer:
+
+```bash
+node bin/fluxlink.js --uninstall
+```
+
+This removes the wrapper and restores every desktop shortcut, autostart entry and
+Windows `.lnk` that the installer changed. Then quit Fluxer and start it normally.
+
+For a manual run:
+
 ```bash
 pkill -f "src/[l]oader.mjs"   # stop the loader
 # then restart Fluxer normally (no flags) to drop the injected plugin entirely
@@ -477,9 +532,11 @@ See [SECURITY.md](SECURITY.md) for the local attack surface and private reportin
 ## Layout
 
 ```
-bin/fluxlink.js               cross-platform launcher (restart Fluxer with CDP + run loader)
+bin/fluxlink.js               cross-platform launcher (install/uninstall, restart Fluxer with CDP, run loader)
 bin/fluxer-bb                 compatibility alias for the old launcher path
 src/loader.mjs                CDP injector, zero dependencies
+src/install.mjs               user-level shortcut/autostart installer
+src/paths.mjs                 shared state/lock paths
 src/store.mjs                 local plugin-store HTTP API (127.0.0.1:9224)
 plugins/                      built-in store index + example plugins
 src/verify.mjs                self-check checklist (+ --selftest, --live, --shot)

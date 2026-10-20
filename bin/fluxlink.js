@@ -12,12 +12,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline/promises";
-import {fileURLToPath} from "node:url";
+import {fileURLToPath, pathToFileURL} from "node:url";
+import {logPath, lockPath, readLock} from "../src/paths.mjs";
 
 const HERE = path.dirname(fs.realpathSync(fileURLToPath(import.meta.url)));
 const ROOT = path.resolve(HERE, "..");
 const args = process.argv.slice(2);
-const has = (name) => args.includes(`--${name}`) || args.includes(`-${name[0]}`);
+const SHORT = {yes: "y", y: "y", help: "h", h: "h", version: "v", v: "v"};
+const has = (name) => args.includes(`--${name}`) || (SHORT[name] ? args.includes(`-${SHORT[name]}`) : false);
 function argValue(name, fallback) {
 	const eq = args.find((a) => a.startsWith(`--${name}=`));
 	if (eq) return eq.slice(name.length + 3);
@@ -42,6 +44,55 @@ const CHECK_ONLY = has("check");
 const NO_RESTART = has("no-restart");
 const VERBOSE = has("verbose");
 const PRINT_BIN = has("print-bin");
+const DAEMON = has("daemon");
+const FORCE = has("force");
+const INSTALL = has("install");
+const UNINSTALL = has("uninstall");
+const STATUS = has("status");
+const AUTOSTART = has("autostart");
+const START_NOW = has("start");
+
+// Options that belong to Fluxlink itself. Everything else is forwarded to
+// Fluxer unchanged (URLs, --fluxer-task=..., etc.) so the replaced desktop
+// entry keeps working.
+const VALUE_OPTIONS = new Set(["port", "api-port", "lock"]);
+const BOOL_OPTIONS = new Set([
+	"yes",
+	"y",
+	"attach",
+	"check",
+	"no-restart",
+	"verbose",
+	"print-bin",
+	"help",
+	"h",
+	"version",
+	"v",
+	"install",
+	"uninstall",
+	"status",
+	"autostart",
+	"start",
+	"daemon",
+	"force",
+]);
+const PASSTHROUGH = [];
+for (let i = 0; i < args.length; i += 1) {
+	const arg = args[i];
+	if (arg.startsWith("--")) {
+		const body = arg.slice(2);
+		const name = body.split("=")[0];
+		if (VALUE_OPTIONS.has(name)) {
+			if (!body.includes("=")) i += 1;
+			continue;
+		}
+		if (BOOL_OPTIONS.has(name)) continue;
+		PASSTHROUGH.push(arg);
+		continue;
+	}
+	if (arg.startsWith("-") && arg.length === 2 && BOOL_OPTIONS.has(arg.slice(1))) continue;
+	PASSTHROUGH.push(arg);
+}
 
 if (has("help") || has("h")) {
 	console.log(`Fluxlink — Broadcast Box bridge for the Fluxer desktop client
@@ -59,6 +110,13 @@ Options:
       --api-port <n>   Plugin-store API port (default 9224, or FLUXER_BB_API_PORT)
       --verbose        Show plugin console messages
       --print-bin      Print the detected Fluxer executable and exit
+      --daemon         Launch Fluxer + the loader in the background and return
+      --force          Stop a running loader and re-inject the current plugin
+      --install        Install Fluxlink as the normal Fluxer launcher
+      --uninstall      Undo --install
+      --status         Show install status and detected paths
+      --autostart      With --install: also start Fluxer through Fluxlink at login
+      --start          With --install: start Fluxer through Fluxlink now
   -h, --help           Show this help
   -v, --version        Show the version
 
@@ -239,18 +297,33 @@ async function waitForCdp(port, timeoutMs) {
 	return false;
 }
 
-function launchFluxer(bin, port) {
-	console.log(`Launching Fluxer with CDP on port ${port}...`);
+function launchFluxer(bin, port, extra = []) {
+	const extraNote = extra.length ? ` (args: ${extra.join(" ")})` : "";
+	console.log(`Launching Fluxer with CDP on port ${port}${extraNote}...`);
 	const child = spawn(
 		bin,
-		[`--remote-debugging-port=${port}`, "--remote-allow-origins=*"],
+		[`--remote-debugging-port=${port}`, "--remote-allow-origins=*", ...extra],
 		{detached: true, stdio: "ignore", windowsHide: false, cwd: path.dirname(bin)},
 	);
 	child.unref();
 }
 
-function runLoader(extra = []) {
-	const loaderArgs = [
+/** Forward URLs / --fluxer-task args to an already-running Fluxer instance. */
+function forwardToFluxer(bin, extra) {
+	if (!extra.length) return;
+	try {
+		const child = spawn(bin, extra, {
+			detached: true,
+			stdio: "ignore",
+			windowsHide: true,
+			cwd: path.dirname(bin),
+		});
+		child.unref();
+	} catch (_) {}
+}
+
+function loaderArgs(extra = []) {
+	const out = [
 		path.join(ROOT, "src", "loader.mjs"),
 		"--port",
 		String(PORT),
@@ -258,8 +331,13 @@ function runLoader(extra = []) {
 		String(API_PORT),
 		...extra,
 	];
-	if (VERBOSE) loaderArgs.push("--verbose");
-	const child = spawn(process.execPath, loaderArgs, {
+	if (VERBOSE) out.push("--verbose");
+	if (FORCE) out.push("--force");
+	return out;
+}
+
+function runLoader(extra = []) {
+	const child = spawn(process.execPath, loaderArgs(extra), {
 		cwd: ROOT,
 		stdio: "inherit",
 		windowsHide: false,
@@ -276,24 +354,59 @@ function runLoader(extra = []) {
 	});
 }
 
+/** Start the loader detached and return immediately (used by installed launchers). */
+function runLoaderDetached() {
+	if (!FORCE && readLock(lockPath(PORT))) {
+		console.log(`Fluxlink is already running on port ${PORT}.`);
+		return;
+	}
+	const out = fs.openSync(logPath(), "a");
+	const child = spawn(process.execPath, loaderArgs(), {
+		cwd: ROOT,
+		detached: true,
+		stdio: ["ignore", out, out],
+		windowsHide: true,
+	});
+	child.unref();
+	child.on("exit", () => {
+		try {
+			fs.closeSync(out);
+		} catch (_) {}
+	});
+}
+
 if (PRINT_BIN) {
 	const bin = findFluxer();
 	console.log(bin || "not found");
 	process.exit(bin ? 0 : 1);
 }
 
+if (INSTALL || UNINSTALL || STATUS) {
+	const installer = await import(pathToFileURL(path.join(ROOT, "src", "install.mjs")).href);
+	const bin = findFluxer();
+	if (STATUS) installer.statusFluxlink({root: ROOT, bin, port: PORT});
+	else if (UNINSTALL) installer.uninstallFluxlink({root: ROOT});
+	else installer.installFluxlink({root: ROOT, autostart: AUTOSTART, start: START_NOW, bin});
+	process.exit(0);
+}
+
 if (CHECK_ONLY) {
 	runLoader(["--check"]);
 } else {
 	const attach = ATTACH_ONLY;
-	if (!attach && (await cdpUp(PORT))) {
+	const cdpRunning = await cdpUp(PORT);
+	if (!attach && cdpRunning) {
 		console.log(`Fluxer already exposes CDP on ${PORT} — attaching.`);
+		const bin = findFluxer();
+		if (bin) forwardToFluxer(bin, PASSTHROUGH);
 	} else if (attach) {
-		if (!(await cdpUp(PORT))) {
+		if (!cdpRunning) {
 			console.error(`No CDP endpoint on 127.0.0.1:${PORT}.`);
 			console.error("Start Fluxer through this launcher without --attach, then retry.");
 			process.exit(1);
 		}
+		const bin = findFluxer();
+		if (bin) forwardToFluxer(bin, PASSTHROUGH);
 	} else {
 		const bin = findFluxer();
 		if (!bin) {
@@ -328,7 +441,7 @@ if (CHECK_ONLY) {
 			}
 			await stopFluxer(bin);
 		}
-		launchFluxer(bin, PORT);
+		launchFluxer(bin, PORT, PASSTHROUGH);
 		if (!(await waitForCdp(PORT, 30000))) {
 			console.error(`CDP port ${PORT} never opened.`);
 			console.error("Check that Fluxer launched, then run:");
@@ -336,5 +449,6 @@ if (CHECK_ONLY) {
 			process.exit(1);
 		}
 	}
-	runLoader();
+	if (DAEMON) runLoaderDetached();
+	else runLoader();
 }
